@@ -1,0 +1,1058 @@
+<?php
+/**
+ * WooCommerce Braintree Gateway
+ *
+ * This source file is subject to the GNU General Public License v3.0
+ * that is bundled with this package in the file license.txt.
+ * It is also available through the world-wide-web at this URL:
+ * http://www.gnu.org/licenses/gpl-3.0.html
+ * If you did not receive a copy of the license and are unable to
+ * obtain it through the world-wide-web, please send an email
+ * to license@woocommerce.com so we can send you a copy immediately.
+ *
+ * DISCLAIMER
+ *
+ * Do not edit or add to this file if you wish to upgrade WooCommerce Braintree Gateway to newer
+ * versions in the future. If you wish to customize WooCommerce Braintree Gateway for your
+ * needs please refer to http://docs.woocommerce.com/document/braintree/
+ *
+ * @package   WC-Braintree/Gateway/API
+ * @author    WooCommerce
+ * @copyright Copyright: (c) 2016-2020, Automattic, Inc.
+ * @license   http://www.gnu.org/licenses/gpl-3.0.html GNU General Public License v3.0
+ */
+
+namespace WC_Braintree\API;
+
+use Braintree\Result\Error;
+use SkyVerge\WooCommerce\PluginFramework\v6_0_1 as Framework;
+use SkyVerge\WooCommerce\PluginFramework\v6_0_1\Helpers\OrderHelper;
+use WC_Braintree\API\Responses\WC_Braintree_API_Merchant_Configuration_Response;
+use WC_Braintree\API\Requests\WC_Braintree_API_Client_Token_Request;
+use WC_Braintree\API\Requests\WC_Braintree_API_Transaction_Request;
+use WC_Braintree\API\Requests\WC_Braintree_API_Customer_Request;
+use WC_Braintree\API\Requests\WC_Braintree_API_Payment_Method_Request;
+use WC_Braintree\API\Requests\WC_Braintree_API_Payment_Method_Nonce_Request;
+use WC_Braintree\WC_Braintree_Payment_Method;
+use WC_Braintree\WC_Gateway_Braintree;
+use WC_Braintree\WC_Gateway_Braintree_PayPal;
+use WC_Braintree\WC_Gateway_Braintree_Venmo;
+
+defined( 'ABSPATH' ) or exit;
+
+/**
+ * Braintree API Class
+ *
+ * This is a pseudo-wrapper around the Braintree PHP SDK
+ *
+ * @link https://github.com/braintree/braintree_php
+ * @link https://developers.braintreepayments.com/javascript+php/reference/overview
+ *
+ * @since 3.0.0
+ */
+class WC_Braintree_API extends Framework\SV_WC_API_Base implements Framework\SV_WC_Payment_Gateway_API {
+
+
+	/** Braintree Partner ID for transactions using Braintree Auth */
+	const BT_AUTH_CHANNEL = 'woothemes_bt';
+
+	/** Braintree Partner ID for transactions using API keys */
+	const API_CHANNEL = 'woocommerce_bt';
+
+
+	/**
+	 * Gateway class instance.
+	 *
+	 * @var \WC_Gateway_Braintree
+	 */
+	protected $gateway;
+
+	/**
+	 * Order associated with the request, if any.
+	 *
+	 * @var \WC_Order
+	 */
+	protected $order;
+
+
+	/**
+	 * Constructor - setup request object and set endpoint
+	 *
+	 * @since 3.0.0
+	 * @param \WC_Gateway_Braintree $gateway class instance.
+	 */
+	public function __construct( $gateway ) {
+
+		$this->gateway = $gateway;
+	}
+
+
+	/** API Methods ***********************************************************/
+
+
+	/**
+	 * Gets the merchant account configuration.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return WC_Braintree_API_Merchant_Configuration_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function get_merchant_configuration() {
+
+		$response = $this->get_client_token( [ 'merchantAccountId' => '' ] );
+
+		$data = base64_decode( $response->get_client_token() );
+
+		// sanity check that the client key has valid JSON to decode.
+		if ( ! json_decode( $data ) ) {
+			throw new Framework\SV_WC_API_Exception( 'The client key contained invalid JSON.', 500 );
+		}
+
+		return new WC_Braintree_API_Merchant_Configuration_Response( $data );
+	}
+
+
+	/**
+	 * Get a client token for initializing the hosted fields or PayPal forms
+	 *
+	 * @since 3.0.0
+	 *
+	 * @param array $args
+	 * @return \WC_Braintree_API_Client_Token_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function get_client_token( array $args = array() ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type' => 'client-token',
+			)
+		);
+
+		$request->get_token( $args );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Get transaction details by transaction ID
+	 *
+	 * @since 3.4.0
+	 *
+	 * @param string $transaction_id Transaction ID.
+	 * @param string $payment_method Payment method (credit_card or paypal).
+	 * @return \WC_Braintree_API_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception If transaction lookup fails.
+	 */
+	public function get_transaction( $transaction_id, $payment_method = null ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'           => 'transaction-find',
+				'payment_method' => $payment_method,
+			)
+		);
+
+		$request->find_transaction( $transaction_id );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Create a new credit card charge transaction
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::credit_card_charge()
+	 *
+	 * @param \WC_Order $order order
+	 * @return \WC_Braintree_API_Credit_Card_Transaction_Response|\WC_Braintree_API_PayPal_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function credit_card_charge( \WC_Order $order ) {
+
+		// pre-verify CSC.
+		if ( $this->get_gateway()->is_credit_card_gateway() && $this->get_gateway()->is_csc_required() ) {
+			$this->verify_csc( $order );
+		}
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_credit_card_charge();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Create a new credit card auth transaction
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::credit_card_authorization()
+	 * @param \WC_Order $order order
+	 * @return \WC_Braintree_API_Credit_Card_Transaction_Response|\WC_Braintree_API_PayPal_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function credit_card_authorization( \WC_Order $order ) {
+
+		// pre-verify CSC.
+		if ( $this->get_gateway()->is_credit_card_gateway() && $this->get_gateway()->is_csc_required() ) {
+			$this->verify_csc( $order );
+		}
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_credit_card_auth();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Verify the CSC for a transaction when using a saved payment toke and CSC
+	 * is required. This must be done prior to processing the actual transaction.
+	 *
+	 * @since 3.0.0
+	 *
+	 * @param \WC_Order $order order.
+	 * @throws Framework\SV_WC_Plugin_Exception if CSC verification fails
+	 */
+	public function verify_csc( \WC_Order $order ) {
+
+		$payment = OrderHelper::get_payment( $order );
+
+		// don't verify the CSC for transactions that are already 3ds verified.
+		if ( ! empty( $payment->use_3ds_nonce ) ) {
+			return;
+		}
+
+		if ( ! empty( $payment->nonce ) && ! empty( $payment->token ) ) {
+
+			$request = $this->get_new_request(
+				array(
+					'type'  => 'payment-method',
+					'order' => $order,
+				)
+			);
+
+			$request->verify_csc( $payment->token, $payment->nonce );
+
+			$result = $this->perform_request( $request );
+
+			if ( ! $result->transaction_approved() ) {
+
+				if ( $result->has_avs_rejection() ) {
+
+					$message = esc_html__( 'The billing address for this transaction does not match the cardholders.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+
+				} elseif ( $result->has_cvv_rejection() ) {
+
+					$message = esc_html__( 'The CSC for the transaction was invalid or incorrect.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+
+				} else {
+
+					$message = $result->get_user_message();
+				}
+
+				throw new Framework\SV_WC_Payment_Gateway_Exception( esc_html( $message ) );
+			}
+		}
+	}
+
+
+	/**
+	 * Capture funds for a credit card authorization
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::credit_card_capture()
+	 * @param \WC_Order $order order.
+	 * @return \WC_Braintree_API_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function credit_card_capture( \WC_Order $order ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_credit_card_capture();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Check Debit - no-op
+	 *
+	 * @since 3.0.0
+	 * @param \WC_Order $order order.
+	 * @return null
+	 */
+	public function check_debit( \WC_Order $order ) { }
+
+
+	/**
+	 * Perform a refund for the order
+	 *
+	 * @since 3.0.0
+	 *
+	 * @param \WC_Order $order the order.
+	 * @return \WC_Braintree_API_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function refund( \WC_Order $order ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_refund();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Perform a void for the order
+	 *
+	 * @since 3.0.0
+	 *
+	 * @param \WC_Order $order the order.
+	 * @return \WC_Braintree_API_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function void( \WC_Order $order ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_void();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Verify the ACH Direct debit nonce for a transaction.
+	 * This must be done prior to processing the actual transaction.
+	 *
+	 * @since 3.7.0
+	 *
+	 * @param \WC_Order $order order.
+	 * @throws Framework\SV_WC_Plugin_Exception If the verification fails.
+	 */
+	public function verify_ach_direct_debit_account( \WC_Order $order ) {
+
+		$customer_id = OrderHelper::get_customer_id( $order );
+		if ( ! $customer_id ) {
+			// A customer is required to validate an ACH nonce.
+			$request = $this->get_new_request(
+				[
+					'type'  => 'customer',
+					'order' => $order,
+				]
+			);
+			$request->create_blank_customer( $order );
+
+			$response = $this->perform_request( $request );
+
+			if ( $response->transaction_approved() ) {
+				OrderHelper::set_customer_id( $order, $response->get_customer_id() );
+			}
+		}
+
+		$request = $this->get_new_request(
+			[
+				'type'  => 'payment-method',
+				'order' => $order,
+			]
+		);
+		$request->verify_ach_direct_debit_account( $order );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Create a new ACH Direct Debit charge transaction.
+	 *
+	 * @since 3.7.0
+	 *
+	 * @param \WC_Order $order The order object.
+	 * @return \WC_Braintree_API_Payment_Method_Response
+	 */
+	public function ach_charge( \WC_Order $order ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_ach_charge();
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Creates a new Local Payments charge transaction.
+	 *
+	 * @since 3.9.0
+	 *
+	 * @param \WC_Order $order The order object.
+	 * @return \WC_Braintree\API\Responses\WC_Braintree_API_PayPal_Transaction_Response
+	 * @throws Framework\SV_WC_Plugin_Exception When the request fails.
+	 */
+	public function local_payments_charge( \WC_Order $order ) {
+
+		$request = $this->get_new_request(
+			array(
+				'type'  => 'transaction',
+				'order' => $order,
+			)
+		);
+
+		$request->create_local_payments_charge();
+
+		return $this->perform_request( $request );
+	}
+
+	/** API Tokenization methods **********************************************/
+
+
+	/**
+	 * Tokenize the payment method associated with the order
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::tokenize_payment_method()
+	 * @param \WC_Order $order the order with associated payment and customer info.
+	 * @return \WC_Braintree_API_Customer_Response|\WC_Braintree_API_Payment_Method_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function tokenize_payment_method( \WC_Order $order ) {
+
+		if ( OrderHelper::get_customer_id( $order ) ) {
+
+			// create a payment method for existing customer.
+			$request = $this->get_new_request(
+				array(
+					'type'  => 'payment-method',
+					'order' => $order,
+				)
+			);
+
+			$request->create_payment_method( $order );
+
+		} else {
+
+			// create both customer and payment method.
+			$request = $this->get_new_request(
+				array(
+					'type'  => 'customer',
+					'order' => $order,
+				)
+			);
+
+			$request->create_customer( $order );
+		}
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Get the tokenized payment methods for the customer
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::get_tokenized_payment_methods()
+	 * @param string $customer_id unique.
+	 * @return \WC_Braintree_API_Customer_response
+	 * @throws Framework\SV_WC_API_Exception
+	 */
+	public function get_tokenized_payment_methods( $customer_id ) {
+
+		$request = $this->get_new_request( array( 'type' => 'customer' ) );
+
+		$request->get_payment_methods( $customer_id );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Update the tokenized payment method for given customer
+	 *
+	 * @since 3.0.0
+	 * @param WC_Order $order The order object.
+	 */
+	public function update_tokenized_payment_method( \WC_Order $order ) {
+
+		// update payment method
+		// https://developers.braintreepayments.com/javascript+php/reference/request/payment-method/update
+	}
+
+
+	/**
+	 * Determines whether updating tokenized methods is supported.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool
+	 */
+	public function supports_update_tokenized_payment_method() {
+
+		return false;
+	}
+
+	/**
+	 * Updates a credit card token expiration date.
+	 *
+	 * @since 2.6.2
+	 * @param string $token the payment method token.
+	 * @param string $expiration_date the expiration date in MM/YY format.
+	 */
+	public function update_cc_token_expiration_date( $token, $expiration_date ) {
+		$request = $this->get_new_request(
+			array(
+				'type' => 'payment-method',
+			)
+		);
+		$request->update_expiration_date( $token, $expiration_date );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Remove the given tokenized payment method for the customer
+	 *
+	 * @since 3.0.0
+	 *
+	 * @see SV_WC_Payment_Gateway_API::remove_tokenized_payment_method()
+	 * @param string $token the payment method token
+	 * @param string $customer_id unique
+	 * @return \WC_Braintree_API_Payment_Method_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function remove_tokenized_payment_method( $token, $customer_id ) {
+
+		$request = $this->get_new_request( array( 'type' => 'payment-method' ) );
+
+		$request->delete_payment_method( $token );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/**
+	 * Braintree supports retrieving tokenized payment methods
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_Payment_Gateway_API::supports_get_tokenized_payment_methods()
+	 * @return boolean true
+	 */
+	public function supports_get_tokenized_payment_methods() {
+		return true;
+	}
+
+
+	/**
+	 * Braintree supports removing tokenized payment methods
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_Payment_Gateway_API::supports_remove_tokenized_payment_method()
+	 * @return boolean true
+	 */
+	public function supports_remove_tokenized_payment_method() {
+		return true;
+	}
+
+
+	/**
+	 * Get payment method info from a client-side provided nonce, generally
+	 * used for retrieving and verifying 3D secure information server-side
+	 *
+	 * @since 3.0.0
+	 * @param string $nonce payment nonce
+	 * @return \WC_Braintree_API_Payment_Method_Nonce_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function get_payment_method_from_nonce( $nonce ) {
+
+		$request = $this->get_new_request( array( 'type' => 'payment-method-nonce' ) );
+
+		$request->get_payment_method( $nonce );
+
+		return $this->perform_request( $request );
+	}
+
+	/**
+	 * Get the payment nonce from a given payment token, generally used to
+	 * provide a nonce for a previously vaulted payment method to the client-side
+	 * 3D Secure verification script
+	 *
+	 * @since 3.0.0
+	 * @param string $token payment method token ID
+	 * @return \WC_Braintree_API_Payment_Method_Nonce_Response
+	 * @throws Framework\SV_WC_Plugin_Exception
+	 */
+	public function get_nonce_from_payment_token( $token ) {
+
+		$request = $this->get_new_request( array( 'type' => 'payment-method-nonce' ) );
+
+		$request->create_nonce( $token );
+
+		return $this->perform_request( $request );
+	}
+
+
+	/** Request/Response Methods **********************************************/
+
+
+	/**
+	 * Perform a remote request using the Braintree SDK. Overriddes the standard
+	 * wp_remote_request() as the SDK already provides a cURL implementation
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_API_Base::do_remote_request()
+	 * @param string $callback SDK static callback, e.g. `\Braintree\ClientToken::generate`.
+	 * @param array  $callback_params parameters to pass to the static callback.
+	 * @return \Exception|mixed
+	 */
+	protected function do_remote_request( $callback, $callback_params ) {
+
+		// configure.
+		if ( $this->is_braintree_auth() ) {
+
+			// configure with access token.
+			$gateway_args = array(
+				'accessToken' => $this->get_gateway()->get_auth_access_token(),
+			);
+
+		} else {
+
+			$gateway_args = array(
+				'environment' => $this->get_gateway()->get_environment(),
+				'merchantId'  => $this->get_gateway()->get_merchant_id(),
+				'publicKey'   => $this->get_gateway()->get_public_key(),
+				'privateKey'  => $this->get_gateway()->get_private_key(),
+			);
+		}
+
+		$sdk_gateway = new \Braintree\Gateway( $gateway_args );
+
+		$resource = $this->get_request()->get_resource();
+
+		try {
+
+			$response = call_user_func_array( array( $sdk_gateway->$resource(), $callback ), $callback_params );
+
+			// When there is a problem with the Level 3 data, Braintree returns a 2046 error code.
+			// This is a generic bank declined error code, Braintree does not provide a specific error code for Level3 data errors.
+			//
+			// @see https://developer.paypal.com/braintree/articles/control-panel/transactions/declines#code-2046
+			// @see https://developer.paypal.com/braintree/docs/reference/general/level-2-and-3-processing/required-fields/php/#validation-errors
+			//
+			// We retry the request again without Level 2/3 data and set a transient so that future requests do not send Level 2/3 data.
+			if (
+				$response instanceof Error &&
+				! $response->success &&
+				isset( $response->transaction, $response->transaction->processorResponseCode ) &&
+				'2046' === $response->transaction->processorResponseCode
+			) {
+				$environment = $this->get_gateway()->get_environment();
+
+				// We only retry the request if the Level 3 data is not already disabled; as the 2046 error might be for another reason.
+				if ( $this->is_level3_data_allowed( $environment ) ) {
+					// Visa and MasterCard have implemented new fees to maintain network health by curbing excessive retries across
+					// each decline code category. These recent mandates affect every Payment Service Provider (PSP), including Braintree.
+					//
+					// @see https://developer.paypal.com/braintree/articles/control-panel/transactions/declines#retrying-declined-transactions.
+					//
+					// For this reason, we use a configurable cooldown window for sending Level 3 data after a 2046 error is returned.
+
+					// Update the option to disable Level 3 data for the current environment.
+					$environment = sanitize_key( $environment );
+					update_option( 'wc_braintree_level3_not_allowed_' . $environment, time() );
+
+					// Remove Level 2 data.
+					unset( $callback_params[0]['taxAmount'] );
+					unset( $callback_params[0]['purchaseOrderNumber'] );
+					// Remove Level 3 data.
+					unset( $callback_params[0]['shippingAmount'] );
+					unset( $callback_params[0]['shippingTaxAmount'] );
+					unset( $callback_params[0]['discountAmount'] );
+					unset( $callback_params[0]['shipsFromPostalCode'] );
+					unset( $callback_params[0]['lineItems'] );
+
+					$this->get_plugin()->log( 'Level3 request data error. Reason: ' . $response->transaction->additionalProcessorResponse );
+					$cooldown_window = self::get_level3_data_bank_declined_cooldown_window( $environment );
+					if ( 0 < $cooldown_window ) {
+						$this->get_plugin()->log( 'Disabling Level 2 and Level 3 transaction data for the current cooldown window: ' . $cooldown_window . ' seconds' );
+					} else {
+						$this->get_plugin()->log( 'Retrying without Level 2 and Level 3 transaction data; no cooldown window is configured (data will be sent for the next eligible transaction).' );
+					}
+
+					// Make the request again without Level 2/3 data.
+					$response = call_user_func_array( array( $sdk_gateway->$resource(), $callback ), $callback_params );
+				}
+			}
+		} catch ( \Exception $e ) {
+
+			$response = $e;
+		}
+
+		return $response;
+	}
+
+
+	/**
+	 * Handle and parse the response
+	 *
+	 * @since 3.0.0
+	 * @param mixed $response directly from Braintree SDK.
+	 * @return \WC_Braintree_API_Response
+	 * @throws Framework\SV_WC_API_Exception Braintree errors.
+	 */
+	protected function handle_response( $response ) {
+
+		// check if Braintree response contains exception and convert to framework exception.
+		if ( $response instanceof \Exception ) {
+			throw new Framework\SV_WC_API_Exception( esc_html( $this->get_braintree_exception_message( $response ) ), $response->getCode(), $response ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+		}
+
+		$handler_class = $this->get_response_handler();
+
+		// determine response type based on payment type.
+		$response_type = $this->get_gateway()->get_payment_type();
+
+		// parse the response body and tie it to the request.
+		$this->response = new $handler_class( $response, $response_type );
+
+		// broadcast request.
+		$this->broadcast_request();
+
+		return $this->response;
+	}
+
+
+
+	/**
+	 * Get a human-friendly message from the Braintree exception object
+	 *
+	 * @link https://developers.braintreepayments.com/reference/general/exceptions/php
+	 * @since 3.0.0
+	 * @param \Exception $e Exception object.
+	 * @return string
+	 */
+	protected function get_braintree_exception_message( $e ) {
+
+		switch ( get_class( $e ) ) {
+
+			case 'Braintree\Exception\Authentication':
+				$message = esc_html__( 'Invalid Credentials, please double-check your API credentials (Merchant ID, Public Key, Private Key, and Merchant Account ID) and try again.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			case 'Braintree\Exception\Authorization':
+				$message = esc_html__( 'Authorization Failed, please verify the user for the API credentials provided can perform transactions and that the request data is correct.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			case 'Braintree\Exception\ServiceUnavailable':
+				$message = esc_html__( 'Braintree is currently down for maintenance, please try again later.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			case 'Braintree\Exception\NotFound':
+				$message = esc_html__( 'The record cannot be found, please contact support.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			case 'Braintree\Exception\ServerError':
+				$message = esc_html__( 'Braintree encountered an error when processing your request, please try again later or contact support.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			case 'Braintree\Exception\SSLCertificate':
+				$message = esc_html__( 'Braintree cannot verify your server\'s SSL certificate. Please contact your hosting provider or try again later.', 'woocommerce-gateway-paypal-powered-by-braintree' );
+				break;
+
+			default:
+				$message = $e->getMessage();
+		}
+
+		return $message;
+	}
+
+
+	/**
+	 * Override the standard request URI with the static callback instead, since
+	 * the Braintree SDK handles the actual remote request
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_API_Base::get_request_uri()
+	 * @return string
+	 */
+	protected function get_request_uri() {
+		return $this->get_request()->get_callback();
+	}
+
+
+	/**
+	 * Override the standard request args with the static callback params instead,
+	 * since the Braintree SDK handles the actual remote request
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_API_Base::get_request_args()
+	 * @return array
+	 */
+	protected function get_request_args() {
+		return $this->get_request()->get_callback_params();
+	}
+
+
+	/**
+	 * Alert other actors that a request has been performed, primarily for
+	 * request/response logging.
+	 *
+	 * @see SV_WC_API_Base::broadcast_request()
+	 * @since 3.0.0
+	 */
+	protected function broadcast_request() {
+
+		$request_data = array(
+			'environment' => $this->get_gateway()->get_environment(),
+			'uri'         => $this->get_request_uri(),
+			'data'        => $this->get_request()->to_string_safe(),
+			'duration'    => $this->get_request_duration() . 's', // seconds.
+		);
+
+		$response_data = array(
+			'data' => is_callable( array( $this->get_response(), 'to_string_safe' ) ) ? $this->get_response()->to_string_safe() : print_r( $this->get_response(), true ),
+		);
+
+		do_action( 'wc_' . $this->get_api_id() . '_api_request_performed', $request_data, $response_data, $this );
+	}
+
+
+	/**
+	 * Builds and returns a new API request object
+	 *
+	 * @since 3.0.0
+	 * @see SV_WC_API_Base::get_new_request()
+	 * @param array $args Request arguments.
+	 * @throws Framework\SV_WC_API_Exception for invalid request types.
+	 * @return WC_Braintree_API_Client_Token_Request|WC_Braintree_API_Transaction_Request|WC_Braintree_API_Customer_Request|WC_Braintree_API_Payment_Method_Request|WC_Braintree_API_Payment_Method_Nonce_Request
+	 */
+	protected function get_new_request( $args = array() ) {
+
+		$this->order = isset( $args['order'] ) && $args['order'] instanceof \WC_Order ? $args['order'] : null;
+
+		switch ( $args['type'] ) {
+
+			case 'client-token':
+				$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Client_Token_Response' );
+				return new WC_Braintree_API_Client_Token_Request();
+
+			case 'transaction':
+				$channel = ( $this->is_braintree_auth() ) ? self::BT_AUTH_CHANNEL : self::API_CHANNEL;
+
+				// Determine the appropriate response handler based on payment type.
+				$payment_type = $this->get_gateway()->get_payment_type();
+				switch ( $payment_type ) {
+					case 'credit-card':
+						$response_handler = 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Credit_Card_Transaction_Response';
+						break;
+					case 'ach':
+						$response_handler = 'WC_Braintree\\API\\Responses\\WC_Braintree_API_ACH_Transaction_Response';
+						break;
+					case 'venmo':
+						$response_handler = 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Venmo_Transaction_Response';
+						break;
+					case 'local_payment':
+						$response_handler = 'WC_Braintree\\API\\Responses\\WC_Braintree_API_PayPal_Transaction_Response';
+						break;
+					case 'paypal':
+					default:
+						$response_handler = 'WC_Braintree\\API\\Responses\\WC_Braintree_API_PayPal_Transaction_Response';
+						break;
+				}
+
+				$this->set_response_handler( $response_handler );
+				return new WC_Braintree_API_Transaction_Request( $this->order, $channel );
+
+			case 'customer':
+				$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Customer_Response' );
+				return new WC_Braintree_API_Customer_Request( $this->order );
+
+			case 'payment-method':
+				$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Payment_Method_Response' );
+				return new WC_Braintree_API_Payment_Method_Request( $this->order );
+
+			case 'payment-method-nonce':
+				$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Payment_Method_Nonce_Response' );
+				return new WC_Braintree_API_Payment_Method_Nonce_Request();
+
+			case 'transaction-find':
+				// Determine the response handler based on payment method.
+				$payment_method = $args['payment_method'] ?? null;
+				if ( WC_Braintree_Payment_Method::PAYPAL_TYPE === $payment_method ) {
+					$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_PayPal_Transaction_Find_Response' );
+				} elseif ( WC_Braintree_Payment_Method::ACH_TYPE === $payment_method ) {
+					$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_ACH_Transaction_Find_Response' );
+				} else {
+					$this->set_response_handler( 'WC_Braintree\\API\\Responses\\WC_Braintree_API_Credit_Card_Transaction_Find_Response' );
+				}
+				return new WC_Braintree_API_Transaction_Request( $this->order, ( $this->is_braintree_auth() ) ? self::BT_AUTH_CHANNEL : self::API_CHANNEL );
+
+			default:
+				throw new Framework\SV_WC_API_Exception( 'Invalid request type' );
+		}
+	}
+
+
+	/** Helper methods ********************************************************/
+
+
+	/**
+	 * Determines if the gateway is configured with Braintree Auth or standard
+	 * API keys.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	protected function is_braintree_auth() {
+
+		return $this->get_gateway()->is_connected() && ! $this->get_gateway()->is_connected_manually();
+	}
+
+
+	/**
+	 * Return the order associated with the request, if any
+	 *
+	 * @since 3.0.0
+	 * @return \WC_Order
+	 */
+	public function get_order() {
+
+		return $this->order;
+	}
+
+
+	/**
+	 * Get the ID for the API, used primarily to namespace the action name
+	 * for broadcasting requests
+	 *
+	 * @since 3.0.0
+	 * @return string
+	 */
+	protected function get_api_id() {
+
+		return $this->get_gateway()->get_id();
+	}
+
+
+	/**
+	 * Return the gateway plugin
+	 *
+	 * @since 3.0.0
+	 * @return \WC_Braintree
+	 */
+	public function get_plugin() {
+
+		return $this->get_gateway()->get_plugin();
+	}
+
+
+	/**
+	 * Returns the gateway class associated with the request
+	 *
+	 * @since 3.0.0
+	 * @return \WC_Gateway_Braintree class instance
+	 */
+	public function get_gateway() {
+
+		return $this->gateway;
+	}
+
+
+	/**
+	 * Check if Level 3 data is allowed for the environment.
+	 *
+	 * @param string $environment The environment of the gateway.
+	 * @return bool True if Level 3 data is allowed, false otherwise.
+	 */
+	public static function is_level3_data_allowed( $environment ) {
+		$environment = sanitize_key( $environment );
+
+		// Check the timestamp option for Level 3 data not allowed,
+		// if it's set and is a valid timestamp, and the cooldown window has not expired, we return false (level 3 data disabled).
+		$timestamp = get_option( 'wc_braintree_level3_not_allowed_' . $environment, false );
+		if ( ! $timestamp || ! is_numeric( $timestamp ) ) {
+			return true;
+		}
+		$cooldown_window = self::get_level3_data_bank_declined_cooldown_window( $environment );
+		if ( 0 === $cooldown_window ) {
+			return true;
+		}
+		return ( $timestamp + $cooldown_window ) < time();
+	}
+
+	/**
+	 * Get the cooldown window for sending Level 3 data after a 2046 bank declined error.
+	 *
+	 * @see https://developer.paypal.com/braintree/articles/control-panel/transactions/declines#code-2046
+	 * @since 3.8.0
+	 *
+	 * @param string $environment The environment of the gateway.
+	 * @return int The cooldown window in seconds.
+	 */
+	protected static function get_level3_data_bank_declined_cooldown_window( $environment ): int {
+		$environment = sanitize_key( $environment );
+
+		/**
+		 * Filter the cooldown window for sending Level 3 data after a 2046 bank declined error.
+		 * Note that returning 0 means there will be no cooldown window and Level 3 data will be sent for the next transaction.
+		 *
+		 * @see https://developer.paypal.com/braintree/articles/control-panel/transactions/declines#retrying-declined-transactions
+		 * @see https://developer.paypal.com/braintree/articles/control-panel/transactions/declines#code-2046
+		 *
+		 * @param int $cooldown_window The cooldown window in seconds. Default is 1 day, as charges are incurred for >15 retries per 30 days.
+		 * @param string $environment The environment of the gateway.
+		 *
+		 * @since 3.8.0
+		 */
+		$cooldown_window = apply_filters( 'wc_braintree_level3_bank_declined_cooldown_window', DAY_IN_SECONDS, $environment );
+		if ( is_numeric( $cooldown_window ) && $cooldown_window >= 0 ) {
+			return (int) $cooldown_window;
+		}
+
+		return DAY_IN_SECONDS;
+	}
+}

@@ -1,0 +1,183 @@
+=== Braintree for WooCommerce Payment Gateway ===
+Contributors: woocommerce, automattic, skyverge
+Tags: ecommerce, e-commerce, commerce, woothemes, wordpress ecommerce, store, sales, sell, shop, shopping, cart, checkout, configurable, paypal, braintree
+Requires at least: 6.8
+Tested up to: 6.9
+Requires PHP: 7.4
+Stable tag: 3.9.0
+License: GPLv3
+License URI: http://www.gnu.org/licenses/gpl-3.0.html
+
+Accept PayPal, Credit Cards, and Debit Cards on your WooCommerce store.
+
+== Description ==
+
+Accept **all major cards, Apple Pay**, and **PayPal** directly with PayPal Braintree for WooCommerce. Customers can save their card details or link a PayPal account for an even faster checkout experience.
+
+= Features =
+
+* **No redirects** — keep customers on your site for payment, reducing the risk of abandoned carts.
+* **Security first**; PCI compliant, with 3D Secure verification and Strong Customer Authentication (SCA).
+* **Express checkout options**, including Buy Now and PayPal Checkout buttons. Customers can save their card details, link a PayPal account, or pay with Apple Pay.
+* **Optimized order management**; process refunds, void transactions, and capture charges from your WooCommerce dashboard.
+* **Route payments in certain currencies** to different Braintree accounts (requires currency switcher).
+* **Compatible** with WooCommerce Subscriptions and WooCommerce Pre-Orders.
+
+= Safe and secure — every time =
+
+Braintree's secure Hosted Fields provide a **seamless** way for customers to enter payment info on your site without redirecting them to PayPal.
+
+It's [PCI compliant](https://listings.pcisecuritystandards.org/documents/Understanding_SAQs_PCI_DSS_v3.pdf) and supports **SCA** and **3D Secure** verification, so you always meet security requirements — without sacrificing flexibility. Plus, Braintree’s [fraud tools](https://articles.braintreepayments.com/guides/fraud-tools/overview) protect your business by helping **detect and prevent fraud**.
+
+= Even faster checkouts =
+
+Customers can **save their credit and debit card details** or **link a PayPal account** to fast-forward checkout the next time they shop with you. Adding **PayPal Checkout** and **Buy Now** buttons to your product, cart, and checkout pages makes purchasing simpler and quicker, too.
+
+= Get paid upfront and earn recurring revenue =
+
+Take charge of how you sell online. PayPal Braintree supports [WooCommerce Subscriptions](https://woocommerce.com/products/woocommerce-subscriptions/) — the perfect solution for earning **recurring revenue**. It's also compatible with [WooCommerce Pre-Orders](https://woocommerce.com/products/woocommerce-pre-orders/), enabling you to accept payment **upfront** or as products ship.
+
+== Frequently Asked Questions ==
+
+= Where can I find documentation? =
+
+You’ve come to the right place. [Our documentation](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/) for PayPal Braintree for WooCommerce includes detailed setup instructions, troubleshooting tips, and more.
+
+= Does this extension work with credit cards, or just PayPal? =
+
+Both! PayPal Braintree for WooCommerce supports payments with credit cards and PayPal. (You can also [enable Apple Pay](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/#support-apple-pay).)
+
+= Does it support subscriptions? =
+
+Yes! PayPal Braintree supports tokenization (required for recurring payments) and is compatible with [WooCommerce Subscriptions](http://woocommerce.com/products/woocommerce-subscriptions/).
+
+= Which currencies are supported? =
+
+Support is available for 25 currencies, [wherever Braintree is available](https://www.paypal.com/us/webapps/mpp/country-worldwide). You can use your store’s native currency or add multiple merchant IDs to process other currencies via different Braintree accounts. To manage multiple currencies, you’ll need a free or paid **currency switcher**, such as [Aelia Currency Switcher](https://aelia.co/shop/currency-switcher-woocommerce/) (requires purchase).
+
+= Can non-US merchants use this extension? =
+
+Yes! It’s supported in [all countries where Braintree is available](https://www.paypal.com/us/webapps/mpp/country-worldwide).
+
+= Does it support testing and production modes? =
+
+Yes; sandbox mode is available so you can test the payment process without activating live transactions. Woo-hoo!
+
+= Credit card payments are working, but PayPal is not — why? =
+
+You may need to [enable PayPal in your Braintree account](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/#my-credentials-are-correct-but-i-still-dont-see-paypal-at-checkout-whats-going-on).
+
+= Can I use this extension for PayPal only? =
+
+Sure thing! See our instructions on [using PayPal Braintree without credit cards](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/#using-paypal-without-credit-cards).
+
+= Will it work with my site’s theme? =
+
+This extension should work with any WooCommerce-compatible theme, but you might need to [customize your theme](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/#theme-issues) for a perfect fit.
+
+= Where can I get support, report bugs, or request new features? =
+
+First, [review our documentation](https://woocommerce.com/document/woocommerce-gateway-paypal-powered-by-braintree/) for troubleshooting tips and answers to common questions. If you need further assistance, please get in touch via the [official support forum](https://wordpress.org/support/plugin/woocommerce-gateway-paypal-powered-by-braintree/).
+
+== Screenshots ==
+
+1. Enter Braintree credentials
+2. Credit card gateway settings
+3. Advanced credit card gateway settings
+4. PayPal gateway settings
+5. Checkout with PayPal directly from the cart
+6. Checkout with PayPal directly from the product page
+
+== Changelog ==
+
+= 3.9.0 - 2026-03-30 =
+* Add - EPS local payment gateway
+* Add - iDEAL local payment gateway.
+* Add - P24 local payment method gateway.
+* Add - Bancontact local payment gateway.
+* Add - BLIK local payment method gateway.
+* Add - MyBank local payment gateway.
+* Add - Make LPM gateways generally accessible.
+* Add - WooCommerce Blocks checkout support for Local Payment Methods.
+* Add - Show admin notice when a local payment method gateway is missing a Merchant Account ID for its supported currencies.
+* Fix - Deprecation messages caused by dynamic properties in PHP 8.2.
+* Dev - Upgrade SkyVerge Framework from 5.15.10 to 6.0.1.
+* Dev - Add compatibility for PHP 8.4.
+* Dev - Bump WooCommerce "tested up to" version 10.6.
+* Dev - Bump WooCommerce minimum supported version to 10.4.
+* Dev - Bump Wordpress minimum supported version to 6.8.
+* Dev - Centralize braintree-js-data-collector script registration.
+* Dev - Add per-method Local Payment Method gateway infrastructure.
+* Dev - Github workflow to run JS unit tests on each PR.
+* Dev - Add additional E2E tests for better coverage.
+
+= 3.8.0 - 2026-03-03 =
+* Add - Make ACH gateway generally accessible.
+* Add - Make Fastlane generally available without requiring the early access toggle.
+* Add - Support for ACH in blocks checkout.
+* Add - Fastlane support to blocks checkout.
+* Add - Style extraction for Fastlane card component to match the active theme's checkout styling.
+* Fix - "View Transaction Details" button functionality when using legacy order screen.
+* Fix - Reduce L3 cooldown period from 3 months to 1 day and add `wc_braintree_level3_bank_declined_cooldown_window` filter.
+* Fix - Add a guard to prevent `assert()` failures when rendering checkout.
+* Fix - Resolve "_doing_it_wrong" notice caused by direct order property access during credit card transactions.
+* Fix - Show standard shipping fields when a Fastlane member has no saved shipping address.
+* Fix - Show card input fields when a Fastlane member has no saved cards in their profile.
+* Fix - Update build code to ensure all translatable strings are included.
+* Update - Remove email confirmation modal for autofilled emails in Fastlane checkout.
+* Tweak - keep billing fields visible when Fastlane returns incomplete address data.
+* Dev - Extract shared Fastlane utility functions into a shared module for reuse across classic and blocks checkout.
+
+= 3.7.0 - 2026-02-02 =
+* Add - Make Venmo gateway generally available.
+* Add - PayPal Fastlane integration for accelerated checkout on shortcode checkout pages.
+* Add - Introduce a checkbox to enable Fastlane Early Access Payment method.
+* Add - Email confirmation modal for Fastlane checkout when email is pre-filled.
+* Add - Remove Fastlane feature flag.
+* Add - ACH Direct Debit support for subscriptions.
+* Add - Support for fetching account configuration data from Braintree.
+* Add - Show a notice on the gateway settings page if gateway is not enabled in any available merchant account.
+* Add - Merchant account ID dropdown to select a merchant account ID for the gateway based on the selected account configuration and currency.
+* Add - Full mandate details for ACH.
+* Add - ACH/SEPA webhook events handler for payment status updates.
+* Update - Restrict manual connection settings to Credit Card and PayPal.
+* Fix - Subscription renewals when using Fastlane.
+* Fix - Improve compatibility with the Avatax plugin when using express checkouts.
+* Fix - Prevent manual credential input on child gateways when no parent gateway credentials are configured.
+* Fix - Shipping fields when using Fastlane with a product that doesn't require shipping.
+* Fix - Limit Fastlane availability to only the guest shoppers.
+* Fix - Billing name not being prefilled when authenticating as a Fastlane member.
+* Fix - Preserve Fastlane address field edit mode across WooCommerce checkout updates.
+* Fix - Show a better description for subscriptions being paid using ACH.
+* Fix - Add some missing PHP direct access checks.
+* Dev - Bump WooCommerce "tested up to" version 10.5.
+* Dev - Bump WooCommerce minimum supported version to 10.3.
+* Dev - Upgrade woocommerce/plugin-check-action to v1.1.5.
+* Dev - Automatic formatting on pre-commit.
+* Dev - Format codebase with wp-scipts.
+
+= 3.6.0 - 2025-12-10 =
+* Add - Venmo payment method support to the block checkout page.
+* Add - Venmo payment method support to the block cart page
+* Add - Subscription support for Venmo.
+* Add - Admin notices for enabled gateways that don't support the current store currency.
+* Add - Dynamic descriptor name support for Venmo gateway.
+* Add - Adds filter `wc_braintree_is_level3_data_allowed` to disable adding Level3 in transaction the request.
+* Update - Make Google Pay generally available.
+* Fix - Venmo payment method label in the My Account subscriptions list.
+* Fix - Apple Pay vaulting consent checkbox is shown when Apple Pay is unavailable.
+* Fix - Prevent selecting unsupported shipping addresses in Apple Pay on shortcode checkout.
+* Fix - Resolve Level 2/3 line item validation error for PayPal transactions with discounts in EUR stores.
+* Fix - Hide Apple Pay and Google Pay tabs on non-Credit Card gateway settings.
+* Fix - Editing saved non-credit-card payment methods.
+* Fix - Early access gateway names in the Plugins page.
+* Tweak - Don't show an error when the shopper closes the Venmo QR modal.
+* Dev - Bump WordPress "tested up to" version 6.9.
+* Dev - Bump WooCommerce "tested up to" version 10.4.
+* Dev - Bump WooCommerce minimum supported version to 10.2.
+* Dev - Extract common/shared classic checkout form handling code to a common base class.
+* Dev - Fix ESLint configuration for plugin text domain and Braintree global.
+* Dev - Add JavaScript unit testing runner pipeline.
+* Dev - Enforce ESLint on new JS changes.
+
+[See changelog for all versions](https://plugins.svn.wordpress.org/woocommerce-gateway-paypal-powered-by-braintree/trunk/changelog.txt).

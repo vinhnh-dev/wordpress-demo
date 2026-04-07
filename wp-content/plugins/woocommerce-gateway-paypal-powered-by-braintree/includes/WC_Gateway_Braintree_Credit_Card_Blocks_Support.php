@@ -1,0 +1,256 @@
+<?php
+/**
+ * Braintree CreditCard Cart and Checkout Blocks Support
+ *
+ * @package WC-Braintree/Gateway/Blocks-Support
+ */
+
+namespace WC_Braintree;
+
+use SkyVerge\WooCommerce\PluginFramework\v6_0_1 as Framework;
+
+defined( 'ABSPATH' ) or exit;
+
+/**
+ * Braintree CreditCard payment method Blocks integration
+ *
+ * @since 3.0.0
+ */
+final class WC_Gateway_Braintree_Credit_Card_Blocks_Support extends WC_Gateway_Braintree_Blocks_Support {
+
+	/**
+	 * Constructor
+	 */
+	public function __construct() {
+		$this->name       = 'braintree_credit_card';
+		$this->asset_path = WC_Braintree::instance()->get_plugin_path() . '/assets/js/blocks/credit-card.asset.php';
+		$this->script_url = WC_Braintree::instance()->get_plugin_url() . '/assets/js/blocks/credit-card.min.js';
+
+		// Get the saved token 3DS nonce via AJAX.
+		add_filter( 'wp_ajax_wc_' . $this->name . '_get_token_data', array( $this, 'ajax_get_token_data' ) );
+
+		// Enqueue Fastlane initializer on checkout blocks page load.
+		add_action( 'woocommerce_blocks_enqueue_checkout_block_scripts_after', array( $this, 'enqueue_fastlane_initializer' ) );
+	}
+
+	/**
+	 * Enqueue Fastlane initializer script on checkout page load.
+	 *
+	 * This script initializes Fastlane and renders the watermark below the email field,
+	 * independent of which payment method is selected.
+	 */
+	public function enqueue_fastlane_initializer() {
+		$payment_gateways = WC()->payment_gateways->payment_gateways();
+		$gateway          = $payment_gateways[ $this->name ] ?? null;
+
+		if ( ! $gateway || ! $gateway->is_fastlane_enabled() ) {
+			return;
+		}
+
+		$gateway->register_gateway_assets();
+
+		// Enqueue Braintree client SDK and data collector (registered in WC_Gateway_Braintree::register_gateway_assets()).
+		wp_enqueue_script( 'braintree-js-client' );
+		wp_enqueue_script( 'braintree-js-data-collector' );
+
+		// Enqueue Fastlane SDK.
+		wp_enqueue_script(
+			'braintree-js-fastlane',
+			'https://js.braintreegateway.com/web/' . WC_Braintree::BRAINTREE_JS_SDK_VERSION . '/js/fastlane.min.js',
+			array( 'braintree-js-client', 'braintree-js-data-collector' ),
+			WC_Braintree::VERSION,
+			true
+		);
+
+		// Enqueue Fastlane styles.
+		wp_enqueue_style(
+			'wc-braintree-fastlane-blocks',
+			WC_Braintree::instance()->get_plugin_url() . '/assets/css/frontend/wc-braintree-fastlane.min.css',
+			array(),
+			WC_Braintree::VERSION
+		);
+
+		// Get asset file for dependencies.
+		$asset_path   = WC_Braintree::instance()->get_plugin_path() . '/assets/js/blocks/fastlane-init.asset.php';
+		$version      = WC_Braintree::VERSION;
+		$dependencies = array( 'braintree-js-client', 'braintree-js-data-collector', 'braintree-js-fastlane' );
+
+		if ( file_exists( $asset_path ) ) {
+			$asset        = require $asset_path;
+			$version      = isset( $asset['version'] ) ? $asset['version'] : $version;
+			$dependencies = array_merge( $dependencies, isset( $asset['dependencies'] ) ? $asset['dependencies'] : array() );
+		}
+
+		// Enqueue Fastlane initializer script.
+		wp_enqueue_script(
+			'wc-braintree-fastlane-blocks-init',
+			WC_Braintree::instance()->get_plugin_url() . '/assets/js/blocks/fastlane-init.min.js',
+			$dependencies,
+			$version,
+			true
+		);
+	}
+
+	/**
+	 * Returns an array of key=>value pairs of data made available to the payment methods script.
+	 *
+	 * @return array
+	 */
+	public function get_payment_method_data() {
+		$params           = array();
+		$payment_gateways = WC()->payment_gateways->payment_gateways();
+		$gateway          = $payment_gateways[ $this->name ];
+		$payment_form     = $this->get_payment_form_instance();
+		if ( $payment_form ) {
+			$params = $payment_form->get_payment_form_handler_js_params();
+		}
+
+		// Get Apple Pay settings.
+		$apple_pay_enabled           = 'yes' === get_option( 'sv_wc_apple_pay_enabled', 'no' );
+		$apple_pay_button_style      = get_option( 'sv_wc_apple_pay_button_style', 'black' );
+		$apple_pay_display_locations = get_option( 'sv_wc_apple_pay_display_locations', array() );
+
+		$data = array_merge(
+			parent::get_payment_method_data(),
+			$params,
+			array(
+				'is_test_environment'                => $gateway->is_test_environment(),
+				'client_token_nonce'                 => wp_create_nonce( 'wc_' . $this->name . '_get_client_token' ),
+				'token_data_nonce'                   => wp_create_nonce( 'wc_' . $this->name . '_get_token_data' ),
+				'is_advanced_fraud_tool'             => $gateway->is_advanced_fraud_tool_enabled(),
+				'cart_contains_subscription'         => $this->cart_contains_subscription(),
+				'order_total_for_3ds'                => ( $payment_form ) ? $payment_form->get_order_total_for_3d_secure() : 0,
+				'debug'                              => $gateway->debug_log(),
+				'icons'                              => $this->get_icons(),
+				'fields_error_messages'              => array(
+					'card_number_required'         => esc_html__( 'Card number is required', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+					'card_number_invalid'          => esc_html__( 'Card number is invalid', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+					'card_cvv_required'            => esc_html__( 'Card security code is required', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+					'card_cvv_invalid'             => esc_html__( 'Card security code is invalid (must be 3 or 4 digits)', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+					'card_expirationDate_required' => esc_html__( 'Card expiration date is required', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+					'card_expirationDate_invalid'  => esc_html__( 'Card expiration date is invalid', 'woocommerce-gateway-paypal-powered-by-braintree' ),
+				),
+				'store_name'                         => \WC_Braintree\WC_Braintree::get_braintree_store_name(),
+
+				// Apple Pay specific data.
+				'apple_pay_enabled'                  => $apple_pay_enabled,
+				'apple_pay_button_style'             => $apple_pay_button_style,
+				'apple_pay_display_locations'        => $apple_pay_display_locations,
+				'apple_pay_recalculate_totals_nonce' => wp_create_nonce( 'wc_' . $this->name . '_apple_pay_recalculate_totals' ),
+
+				// Fastlane data.
+				'fastlane_enabled'                   => $gateway->is_fastlane_enabled(),
+			),
+		);
+
+		// Get Google Pay settings.
+		$google_pay = WC_Braintree::instance()->get_google_pay_instance();
+
+		// Only add the Google Pay specific data if the Google Pay instance is available.
+		if ( $google_pay ) {
+			$data['google_pay'] = [
+				'merchant_id'              => $google_pay->get_merchant_id(),
+				'recalculate_totals_nonce' => wp_create_nonce( 'wc_' . $this->name . '_google_pay_recalculate_totals' ),
+				'process_payment_nonce'    => wp_create_nonce( 'wc_' . $this->name . '_google_pay_process_payment' ),
+				'button_style'             => $google_pay->get_button_style(),
+				'card_types'               => $google_pay->get_supported_networks(),
+				// This is needed because of a bug in the Google Pay Skyverge library.
+				// The method get_supported_networks() used above retrun [] if the processing gateway is not set; however there is no such check in get_available_countries().
+				'countries'                => $google_pay->get_processing_gateway() ? $google_pay->get_available_countries() : [],
+				'currencies'               => [ get_woocommerce_currency() ],
+				'flags'                    => [
+					'is_enabled'   => $google_pay->is_enabled(),
+					'is_available' => $google_pay->is_available(),
+					'is_test_mode' => $google_pay->is_test_mode(),
+				],
+			];
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Determines if the cart contains a subscription.
+	 */
+	private function cart_contains_subscription() {
+		if ( wc_braintree()->is_subscriptions_active() && class_exists( 'WC_Subscriptions_Cart' ) ) {
+			return \WC_Subscriptions_Cart::cart_contains_subscription();
+		}
+		return false;
+	}
+
+	/**
+	 * Gets token data via AJAX.
+	 */
+	public function ajax_get_token_data() {
+		check_ajax_referer( 'wc_' . $this->name . '_get_token_data', 'nonce' );
+
+		$payment_gateways = WC()->payment_gateways->payment_gateways();
+		$gateway          = $payment_gateways[ $this->name ];
+		if ( ! $gateway || ! $gateway->is_available() ) {
+			wp_send_json_error( array( 'message' => esc_html__( 'Gateway is not available', 'woocommerce-gateway-paypal-powered-by-braintree' ) ) );
+		}
+
+		try {
+			$token_id   = isset( $_POST['token_id'] ) ? wc_clean( wp_unslash( $_POST['token_id'] ) ) : '';
+			$core_token = \WC_Payment_Tokens::get_tokens(
+				array(
+					'user_id'    => get_current_user_id(),
+					'token_id'   => $token_id,
+					'gateway_id' => $this->name,
+				)
+			);
+
+			if ( empty( $core_token ) ) {
+				wp_send_json_error( array( 'message' => esc_html__( 'Payment error, please try another payment method or contact us to complete your transaction.', 'woocommerce-gateway-paypal-powered-by-braintree' ) ) );
+			}
+			$core_token = current( $core_token );
+
+			$token = new Framework\SV_WC_Payment_Gateway_Payment_Token( $core_token->get_token(), $core_token );
+			$nonce = '';
+
+			if ( $gateway->card_type_supports_3d_secure( $token->get_card_type() ) ) {
+				$nonce_data = $gateway->get_3d_secure_data_for_token( $token );
+				$nonce      = $nonce_data['nonce'] ?? '';
+				$bin        = $nonce_data['bin'] ?? '';
+			}
+
+			wp_send_json_success(
+				array(
+					'token' => $core_token->get_token(),
+					'nonce' => $nonce,
+					'bin'   => $bin,
+				)
+			);
+
+		} catch ( \Exception $e ) {
+
+			$gateway->add_debug_message( $e->getMessage(), 'error' );
+
+			wp_send_json_error(
+				array(
+					'message' => $e->getMessage(),
+				)
+			);
+		}
+	}
+
+	/**
+	 * Gets the card icons.
+	 */
+	private function get_icons() {
+		$payment_gateways = WC()->payment_gateways->payment_gateways();
+		$gateway          = $payment_gateways[ $this->name ];
+		$card_types       = $gateway->get_card_types();
+		$card_icons       = array();
+
+		foreach ( $card_types as $card_type ) {
+			$card_type                = Framework\SV_WC_Payment_Gateway_Helper::normalize_card_type( $card_type );
+			$card_icons[ $card_type ] = array(
+				'alt' => $card_type,
+				'src' => $gateway->get_payment_method_image_url( $card_type ),
+			);
+		}
+		return $card_icons;
+	}
+}

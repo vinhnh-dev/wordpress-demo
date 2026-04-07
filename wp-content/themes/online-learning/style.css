@@ -1,0 +1,19 @@
+/*
+Theme Name:         Online Learning
+Theme URI:          https://example.com/
+Description:         A block theme skeleton for course sites. Pairs with the Online Learning plugin (Courses & Lessons).
+Requires at least:  6.4
+Tested up to:       6.9
+Requires PHP:       7.4
+Version:            1.0.0
+Author:             Your Name
+License:            GNU General Public License v2 or later
+License URI:        https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+Text Domain:        online-learning-theme
+Tags:               full-site-editing, block-theme, education, blog, one-column
+*/
+
+body {
+	background-color: var(--wp--preset--color--surface);
+	color: var(--wp--preset--color--ink);
+}
